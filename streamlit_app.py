@@ -115,6 +115,7 @@ def db() -> sqlite3.Connection:
     CACHE_DIR.mkdir(exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
+    con.execute("pragma busy_timeout = 30000")
     return con
 
 
@@ -158,14 +159,16 @@ def read_csv_chunks(path: Path, usecols: list[str], chunksize: int) -> Iterable[
 
 def build_fdc_cache(max_product_rows: int | None = None, max_nutrient_rows: int | None = None) -> None:
     CACHE_DIR.mkdir(exist_ok=True)
-    if DB_PATH.exists():
-        DB_PATH.unlink()
 
     progress = st.progress(0, text="Creating product search index")
     status = st.empty()
 
     with db() as con:
         con.execute("pragma journal_mode = wal")
+        con.execute("drop table if exists products_fts")
+        con.execute("drop table if exists products")
+        con.execute("drop table if exists food_names")
+        con.execute("drop table if exists nutrients")
         con.execute(
             """
             create table products (
