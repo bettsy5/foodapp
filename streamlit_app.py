@@ -702,19 +702,18 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Data")
-        st.write(f"FDC cache: {'ready' if fdc_cache_ready() else 'not built'}")
-        if not local_fdc_files_available():
-            st.caption("Local USDA CSV files are not present. The app will use OpenFoodFacts online search.")
-        sample = st.checkbox("Build smaller demo cache", value=False)
-        max_product_rows = 150_000 if sample else None
-        max_nutrient_rows = 1_000_000 if sample else None
-        if st.button("Build or rebuild FDC cache", type="primary"):
-            if local_fdc_files_available():
+        if local_fdc_files_available():
+            st.write(f"FDC cache: {'ready' if fdc_cache_ready() else 'not built'}")
+            sample = st.checkbox("Build smaller demo cache", value=False)
+            max_product_rows = 150_000 if sample else None
+            max_nutrient_rows = 1_000_000 if sample else None
+            if st.button("Build or rebuild FDC cache", type="primary"):
                 build_fdc_cache(max_product_rows=max_product_rows, max_nutrient_rows=max_nutrient_rows)
                 st.cache_data.clear()
                 st.rerun()
-            else:
-                st.error("USDA CSV files are not available in this deployment.")
+        else:
+            st.success("Deployment mode: using OpenFoodFacts online search.")
+            st.caption("USDA CSV files are excluded from GitHub because they are too large for deployment.")
         st.divider()
         enrich_off = st.checkbox(
             "Enrich selected product from OpenFoodFacts",
