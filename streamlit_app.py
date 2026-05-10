@@ -9,7 +9,6 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
-import requests
 import streamlit as st
 
 
@@ -132,10 +131,6 @@ def fdc_cache_ready() -> bool:
         return False
     with db() as con:
         return table_exists(con, "products_fts") and table_exists(con, "nutrients")
-
-
-def local_fdc_files_available() -> bool:
-    return FDC_BRANDED.exists() and FDC_FOOD.exists() and FDC_NUTRIENT.exists()
 
 
 def make_match_query(query: str) -> str:
@@ -425,80 +420,6 @@ def row_to_product(row: dict) -> Product:
     )
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
-def search_openfoodfacts_api(query: str, limit: int = 20) -> list[dict]:
-    if not query.strip():
-        return []
-    url = "https://world.openfoodfacts.org/cgi/search.pl"
-    params = {
-        "search_terms": query,
-        "search_simple": 1,
-        "action": "process",
-        "json": 1,
-        "page_size": limit,
-        "fields": ",".join(
-            [
-                "code",
-                "product_name",
-                "brands",
-                "categories",
-                "categories_en",
-                "ingredients_text",
-                "labels_en",
-                "additives_n",
-                "nutriscore_score",
-                "nutriscore_grade",
-                "nova_group",
-                "ecoscore_grade",
-                "environmental_score_grade",
-                "nutriments",
-                "image_small_url",
-            ]
-        ),
-    }
-    try:
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status()
-    except requests.RequestException:
-        return []
-    return response.json().get("products", [])
-
-
-def off_api_to_product(row: dict) -> Product:
-    return Product(
-        source="OpenFoodFacts API",
-        fdc_id=None,
-        name=row.get("product_name") or "Unnamed product",
-        brand=row.get("brands") or "",
-        barcode=normalize_barcode(row.get("code")),
-        category=row.get("categories_en") or row.get("categories") or "",
-        ingredients=row.get("ingredients_text") or "",
-        serving="per 100 g/ml when available",
-        modified_date="",
-        extra=row,
-    )
-
-
-def off_api_to_nutrients(row: dict) -> dict[str, float]:
-    nutriments = row.get("nutriments") or {}
-    mapping = {
-        "energy-kcal_100g": "calories",
-        "fat_100g": "fat_g",
-        "saturated-fat_100g": "sat_fat_g",
-        "carbohydrates_100g": "carbs_g",
-        "sugars_100g": "sugars_g",
-        "fiber_100g": "fiber_g",
-        "proteins_100g": "protein_g",
-        "sodium_100g": "sodium_mg",
-    }
-    out = {}
-    for raw, clean in mapping.items():
-        value = pd.to_numeric(nutriments.get(raw), errors="coerce")
-        if pd.notna(value):
-            out[clean] = float(value * 1000 if raw == "sodium_100g" else value)
-    return out
-
-
 def first_match_terms(text: str, weighted_terms: dict[str, int]) -> list[str]:
     lower = text.lower()
     return [term for term in weighted_terms if term in lower]
@@ -621,13 +542,9 @@ def metric_card(label: str, score: int) -> None:
 
 
 def render_product(product: Product, enrich_off: bool) -> None:
-    off = product.extra if product.source == "OpenFoodFacts API" else None
-    if not off and enrich_off and product.barcode:
-        off = find_off_by_barcode(product.barcode)
+    off = find_off_by_barcode(product.barcode) if enrich_off and product.barcode else None
     nutrients = get_fdc_nutrients(product.fdc_id) if product.fdc_id else {}
-    if product.source == "OpenFoodFacts API" and off:
-        nutrients = {**nutrients, **off_api_to_nutrients(off)}
-    elif off:
+    if off:
         nutrients = {**nutrients, **off_to_nutrients(off)}
         product.ingredients = off.get("ingredients_text") or product.ingredients
 
@@ -687,8 +604,7 @@ def render_product(product: Product, enrich_off: bool) -> None:
         off_cols[0].metric("Nutri-Score", str(off.get("nutriscore_grade") or "NA").upper())
         off_cols[1].metric("NOVA", off.get("nova_group") or "NA")
         off_cols[2].metric("Additives", off.get("additives_n") or "NA")
-        eco = off.get("environmental_score_grade") or off.get("ecoscore_grade") or "NA"
-        off_cols[3].metric("Eco Score", str(eco).upper())
+        off_cols[3].metric("Eco Score", str(off.get("environmental_score_grade") or "NA").upper())
         if off.get("labels_en"):
             st.caption("Labels: " + off["labels_en"])
     elif enrich_off:
@@ -702,18 +618,14 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Data")
-        if local_fdc_files_available():
-            st.write(f"FDC cache: {'ready' if fdc_cache_ready() else 'not built'}")
-            sample = st.checkbox("Build smaller demo cache", value=False)
-            max_product_rows = 150_000 if sample else None
-            max_nutrient_rows = 1_000_000 if sample else None
-            if st.button("Build or rebuild FDC cache", type="primary"):
-                build_fdc_cache(max_product_rows=max_product_rows, max_nutrient_rows=max_nutrient_rows)
-                st.cache_data.clear()
-                st.rerun()
-        else:
-            st.success("Deployment mode: using OpenFoodFacts online search.")
-            st.caption("USDA CSV files are excluded from GitHub because they are too large for deployment.")
+        st.write(f"FDC cache: {'ready' if fdc_cache_ready() else 'not built'}")
+        sample = st.checkbox("Build smaller demo cache", value=False)
+        max_product_rows = 150_000 if sample else None
+        max_nutrient_rows = 1_000_000 if sample else None
+        if st.button("Build or rebuild FDC cache", type="primary"):
+            build_fdc_cache(max_product_rows=max_product_rows, max_nutrient_rows=max_nutrient_rows)
+            st.cache_data.clear()
+            st.rerun()
         st.divider()
         enrich_off = st.checkbox(
             "Enrich selected product from OpenFoodFacts",
@@ -726,8 +638,11 @@ def main() -> None:
     if not query:
         st.stop()
 
-    use_local = fdc_cache_ready()
-    results = search_fdc(query) if use_local else search_openfoodfacts_api(query)
+    if not fdc_cache_ready():
+        st.warning("Build the FDC cache from the sidebar before searching.")
+        st.stop()
+
+    results = search_fdc(query)
     if not results:
         st.error("No products found. Try a shorter brand or category phrase.")
         st.stop()
@@ -735,7 +650,7 @@ def main() -> None:
     labels = []
     products = []
     for row in results:
-        product = row_to_product(row) if use_local else off_api_to_product(row)
+        product = row_to_product(row)
         products.append(product)
         labels.append(
             " | ".join(
