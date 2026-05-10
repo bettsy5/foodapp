@@ -1,0 +1,19 @@
+# Local data exports are too large for GitHub/Streamlit Cloud.
+en.openfoodfacts.org.products.csv
+FoodData_Central_branded_food_csv_2025-12-18/
+
+# Generated local cache and runtime files.
+.food_grader_cache/
+__pycache__/
+*.py[cod]
+
+# Local installers and environment files.
+python-*.exe
+.venv/
+venv/
+env/
+
+# OS/editor noise.
+.DS_Store
+Thumbs.db
+.vscode/
